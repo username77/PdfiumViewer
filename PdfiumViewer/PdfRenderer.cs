@@ -37,11 +37,22 @@ namespace PdfiumViewer
         private bool _isSelectingText = false;
         private MouseState _cachedMouseState = null;
         private TextSelectionState _textSelectionState = null;
+        private PdfViewerInteractionMode _mode = PdfViewerInteractionMode.None;
 
+        private Point _rbStart;
+        private Rectangle _rbRect;
+        private Rectangle _rbPrevRect;
+
+        private Point _panStart;
+        private Point _panDisplayStart;
         /// <summary>
         /// The associated PDF document.
         /// </summary>
         public IPdfDocument Document { get; private set; }
+
+
+        [DefaultValue(true)]
+        public bool AutoCopyTextSelectionToClipboard { get; set; } = true;
 
         /// <summary>
         /// Gets or sets a value indicating whether the user can give the focus to this control using the TAB key.
@@ -140,7 +151,10 @@ namespace PdfiumViewer
             set
             {
                 _cursorMode = value;
-                MousePanningEnabled = _cursorMode == PdfViewerCursorMode.Pan;
+                //MousePanningEnabled = _cursorMode == PdfViewerCursorMode.Pan; //original verson
+                // IMPORTANT: disabilitiamo il panning automatico del base control.
+                // Il pan lo gestiamo SOLO col tasto destro.
+                MousePanningEnabled = false;
             }
         }
 
@@ -629,6 +643,8 @@ namespace PdfiumViewer
             SetDisplayRectLocation(new Point(0, 0));
 
             ReloadDocument();
+
+            ResetInteractionToDefault(); //resetta la modalità di interazione
         }
 
         public void ReloadDocument()
@@ -888,6 +904,17 @@ namespace PdfiumViewer
                 }
             }
 
+            // Rubberband on top
+            if (_mode == PdfViewerInteractionMode.RubberbandZoom && _rbRect.Width > 0 && _rbRect.Height > 0)
+            {
+                using (var pen = new Pen(Color.Black, 1))
+                {
+                    pen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
+                    e.Graphics.DrawRectangle(pen, _rbRect);
+                }
+            }
+
+
             if (_visiblePageStart == -1)
                 _visiblePageStart = 0;
             if (_visiblePageEnd == -1)
@@ -950,7 +977,7 @@ namespace PdfiumViewer
 
             int height = (int)(scaledHeight + (ShadeBorder.Size.Vertical + PageMargin.Vertical) * Document.PageCount);
             int width = (int)(_maxWidth * _scaleFactor + ShadeBorder.Size.Horizontal + PageMargin.Horizontal);
-            
+
             var center = new Point(
                 DisplayRectangle.Width / 2,
                 DisplayRectangle.Height / 2
@@ -959,7 +986,8 @@ namespace PdfiumViewer
             if (
                 DisplayRectangle.Width > ClientSize.Width ||
                 DisplayRectangle.Height > ClientSize.Height
-            ) {
+            )
+            {
                 center.X += DisplayRectangle.Left;
                 center.Y += DisplayRectangle.Top;
             }
@@ -978,16 +1006,56 @@ namespace PdfiumViewer
         /// <param name="e">The event args.</param>
         protected override void OnSetCursor(SetCursorEventArgs e)
         {
-            _cachedLink = null;
+            // Se stiamo facendo pan col destro
+            if (_mode == PdfViewerInteractionMode.RightPan)
+            {
+                e.Cursor = Cursors.Hand;
+                return;
+            }
 
+            // Se siamo in text selection, usa la logica originale (IBeam su testo, Hand su link)
+            if (_cursorMode == PdfViewerCursorMode.TextSelection)
+            {
+                _cachedLink = null;
+
+                if (_pageCacheValid)
+                {
+                    var offset = GetScrollOffset();
+                    var location = new Point(e.Location.X - offset.Width, e.Location.Y - offset.Height);
+
+                    for (int page = _visiblePageStart; page <= _visiblePageEnd; page++)
+                    {
+                        foreach (var link in GetPageLinks(page))
+                        {
+                            if (link.Bounds.Contains(location))
+                            {
+                                _cachedLink = link;
+                                //e.Cursor = Cursors.Hand;
+                                e.Cursor = Cursors.IBeam; //non usiamo Hand sui link in text selection
+                                return;
+                            }
+                        }
+                    }
+
+                    var state = GetMouseState(e.Location);
+                    if (state.CharacterIndex >= 0)
+                    {
+                        e.Cursor = Cursors.IBeam;
+                        return;
+                    }
+                }
+
+                // invece di base.OnSetCursor(e);
+                e.Cursor = Cursors.IBeam;
+                return;
+            }
+
+            // Modalità normale: CROCE sempre (tranne sui link se vuoi mantenerli cliccabili)
+            _cachedLink = null;
             if (_pageCacheValid)
             {
                 var offset = GetScrollOffset();
-
-                var location = new Point(
-                    e.Location.X - offset.Width,
-                    e.Location.Y - offset.Height
-                );
+                var location = new Point(e.Location.X - offset.Width, e.Location.Y - offset.Height);
 
                 for (int page = _visiblePageStart; page <= _visiblePageEnd; page++)
                 {
@@ -996,73 +1064,304 @@ namespace PdfiumViewer
                         if (link.Bounds.Contains(location))
                         {
                             _cachedLink = link;
-                            e.Cursor = Cursors.Hand;
+                            //e.Cursor = Cursors.Hand; // opzionale: commenta se vuoi croce anche sui link
+                            e.Cursor = Cursors.Cross; // croce anche sui link
                             return;
                         }
                     }
                 }
-
-                if (_cursorMode == PdfViewerCursorMode.TextSelection)
-                {
-                    var state = GetMouseState(e.Location);
-                    if (state.CharacterIndex >= 0)
-                    {
-                        e.Cursor = Cursors.IBeam;
-                        return;
-                    }
-                }
             }
 
-            base.OnSetCursor(e);
+            e.Cursor = Cursors.Cross;
         }
+
+        //protected override void OnSetCursorOld(SetCursorEventArgs e)
+        //{
+        //    _cachedLink = null;
+
+        //    if (_pageCacheValid)
+        //    {
+        //        var offset = GetScrollOffset();
+
+        //        var location = new Point(
+        //            e.Location.X - offset.Width,
+        //            e.Location.Y - offset.Height
+        //        );
+
+        //        for (int page = _visiblePageStart; page <= _visiblePageEnd; page++)
+        //        {
+        //            foreach (var link in GetPageLinks(page))
+        //            {
+        //                if (link.Bounds.Contains(location))
+        //                {
+        //                    _cachedLink = link;
+        //                    e.Cursor = Cursors.Hand;
+        //                    return;
+        //                }
+        //            }
+        //        }
+
+        //        if (_cursorMode == PdfViewerCursorMode.TextSelection)
+        //        {
+        //            var state = GetMouseState(e.Location);
+        //            if (state.CharacterIndex >= 0)
+        //            {
+        //                e.Cursor = Cursors.IBeam;
+        //                return;
+        //            }
+        //        }
+        //    }
+
+        //    base.OnSetCursor(e);
+        //}
 
         /// <summary>Raises the <see cref="E:System.Windows.Forms.Control.MouseDown" /> event.</summary>
         /// <param name="e">A <see cref="T:System.Windows.Forms.MouseEventArgs" /> that contains the event data. </param>
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            // RIGHT o MIDDLE: esci SEMPRE dalla TextSelection e torna alla croce
+            if (e.Button == MouseButtons.Right || e.Button == MouseButtons.Middle)
+            {
+                if (_cursorMode == PdfViewerCursorMode.TextSelection)
+                {
+                    // chiudi eventuale selezione testo in corso
+                    _isSelectingText = false;
+                    Capture = false;
+
+                    // torna alla modalità normale (rubberband + croce)
+                    CursorMode = PdfViewerCursorMode.Pan;   // "Pan" qui lo usiamo come modalità base del viewer
+                    Cursor = Cursors.Cross;
+                    Invalidate();
+                }
+            }
+            if (_mode == PdfViewerInteractionMode.RubberbandZoom && e.Button == MouseButtons.Right)
+            {
+                // cancella rubberband
+                _mode = PdfViewerInteractionMode.None;
+                _rbRect = Rectangle.Empty;
+                _rbPrevRect = Rectangle.Empty;
+                Capture = false;
+                Invalidate();
+            }
+
+            // MIDDLE: reset FitBest
+            if (e.Button == MouseButtons.Middle)
+            {
+                // Reset "fit"
+                ZoomMode = PdfViewerZoomMode.FitBest;
+                Zoom = 1.0;
+
+                // cursore torna croce
+                Cursor = Cursors.Cross;
+                return; // non chiamare base
+            }
+
+            // RIGHT: pan temporaneo
+            if (e.Button == MouseButtons.Right && _cursorMode != PdfViewerCursorMode.TextSelection)
+            {
+                // pan solo se c'e' qualcosa da pannare
+                bool canPan = DisplayRectangle.Width > ClientSize.Width || DisplayRectangle.Height > ClientSize.Height;
+                if (canPan)
+                {
+                    _mode = PdfViewerInteractionMode.RightPan;
+                    _panStart = e.Location;
+                    _panDisplayStart = DisplayRectangle.Location;
+                    Capture = true;
+                    Cursor = Cursors.Hand;
+                    return; // non chiamare base
+                }
+            }
+
+            // LEFT: rubberband zoom (solo se NON siamo in text selection)
+            if (e.Button == MouseButtons.Left && _cursorMode != PdfViewerCursorMode.TextSelection)
+            {
+                _mode = PdfViewerInteractionMode.RubberbandZoom;
+                _rbStart = e.Location;
+                _rbRect = Rectangle.Empty;
+                _rbPrevRect = Rectangle.Empty;
+
+                Capture = true;
+                Cursor = Cursors.Cross;
+                return; // non chiamare base (evita pan automatico)
+            }
+
+            // Text selection e link: usa comportamento originale
             base.OnMouseDown(e);
 
-            HandleMouseDownForLinks(e);
-
+            //HandleMouseDownForLinks(e);
             if (_cursorMode == PdfViewerCursorMode.TextSelection)
-            {
                 HandleMouseDownForTextSelection(e);
-            }
         }
+        //protected override void OnMouseDownOld(MouseEventArgs e)
+        //{
+        //    base.OnMouseDown(e);
+
+        //    HandleMouseDownForLinks(e);
+
+        //    if (_cursorMode == PdfViewerCursorMode.TextSelection)
+        //    {
+        //        HandleMouseDownForTextSelection(e);
+        //    }
+        //}
 
         /// <summary>Raises the <see cref="E:System.Windows.Forms.Control.MouseUp" /> event.</summary>
         /// <param name="e">A <see cref="T:System.Windows.Forms.MouseEventArgs" /> that contains the event data. </param>
         protected override void OnMouseUp(MouseEventArgs e)
         {
+            // finish right pan
+            if (_mode == PdfViewerInteractionMode.RightPan && e.Button == MouseButtons.Right)
+            {
+                Capture = false;
+                _mode = PdfViewerInteractionMode.None;
+
+                Cursor = Cursors.Cross; // torna croce come richiesto
+                return;
+            }
+
+            // finish rubberband -> zoom
+            if (_mode == PdfViewerInteractionMode.RubberbandZoom && e.Button == MouseButtons.Left)
+            {
+                Capture = false;
+                var rect = _rbRect;
+
+                _mode = PdfViewerInteractionMode.None;
+                _rbRect = Rectangle.Empty;
+                _rbPrevRect = Rectangle.Empty;
+
+                Cursor = Cursors.Cross; // torna croce come richiesto
+                Invalidate();
+
+                if (rect.Width >= 8 && rect.Height >= 8)
+                    ZoomToClientRectangle(rect);
+
+                return;
+            }
+
+            // middle up: torna croce
+            if (e.Button == MouseButtons.Middle)
+            {
+                Cursor = Cursors.Cross;
+                return;
+            }
+
             base.OnMouseUp(e);
 
-            HandleMouseUpForLinks(e);
-
+            //HandleMouseUpForLinks(e);
             if (_cursorMode == PdfViewerCursorMode.TextSelection)
-            {
                 HandleMouseUpForTextSelection(e);
-            }
         }
+
+
+        //protected override void OnMouseUp(MouseEventArgs e)
+        //{
+        //    base.OnMouseUp(e);
+
+        //    HandleMouseUpForLinks(e);
+
+        //    if (_cursorMode == PdfViewerCursorMode.TextSelection)
+        //    {
+        //        HandleMouseUpForTextSelection(e);
+        //    }
+        //}
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            // Right pan
+            if (_mode == PdfViewerInteractionMode.RightPan && Capture)
+            {
+                var dx = e.Location.X - _panStart.X;
+                var dy = e.Location.Y - _panStart.Y;
+
+                SetDisplayRectLocation(new Point(_panDisplayStart.X + dx, _panDisplayStart.Y + dy));
+                return;
+            }
+
+            // Rubberband
+            if (_mode == PdfViewerInteractionMode.RubberbandZoom && Capture)
+            {
+                var newRect = NormalizeRect(Rectangle.FromLTRB(_rbStart.X, _rbStart.Y, e.X, e.Y));
+                var invalidate = Rectangle.Union(_rbPrevRect, newRect);
+                invalidate.Inflate(3, 3);
+
+                _rbPrevRect = newRect;
+                _rbRect = newRect;
+
+                //Invalidate(invalidate);
+                Invalidate(); // più semplice e non si perde mai
+                return;
+            }
+
             base.OnMouseMove(e);
 
             if (_cursorMode == PdfViewerCursorMode.TextSelection)
-            {
                 HandleMouseMoveForTextSelection(e);
-            }
         }
+
+        //protected override void OnMouseMove(MouseEventArgs e)
+        //{
+        //    base.OnMouseMove(e);
+
+        //    if (_cursorMode == PdfViewerCursorMode.TextSelection)
+        //    {
+        //        HandleMouseMoveForTextSelection(e);
+        //    }
+        //}
+
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
-            base.OnMouseDoubleClick(e);
-
-            if (_cursorMode == PdfViewerCursorMode.TextSelection)
+            if (e.Button == MouseButtons.Left)
             {
+                // Proviamo a capire subito se sotto il mouse c'è una parola
+                var pdfLocation = PointToPdf(e.Location);
+                bool hasWord = false;
+
+                if (pdfLocation.IsValid && Document != null)
+                {
+                    hasWord = Document.GetWordAtPosition(pdfLocation, 4f, 4f, out var _);
+                }
+
+                // Se NON c'è testo -> torna subito in modalità ZoomRect + croce
+                if (!hasWord)
+                {
+                    _textSelectionState = null;
+                    _isSelectingText = false;
+                    Capture = false;
+
+                    CursorMode = PdfViewerCursorMode.Pan;   // nel tuo fork = modalità "normale" (croce + rubberband)
+                    _mode = PdfViewerInteractionMode.None;
+
+                    Cursor = Cursors.Cross;
+                    Invalidate();
+                    return;
+                }
+
+                // Se c'è testo: entra/resta in TextSelection, seleziona parola e copia
+                if (_cursorMode != PdfViewerCursorMode.TextSelection)
+                    CursorMode = PdfViewerCursorMode.TextSelection;
+
                 HandleMouseDoubleClickForTextSelection(e);
+
+                if (AutoCopyTextSelectionToClipboard)
+                    TryCopySelectionToClipboard();
+
+                return;
             }
+
+            base.OnMouseDoubleClick(e);
         }
+
+
+
+        //protected override void OnMouseDoubleClick(MouseEventArgs e)
+        //{
+        //    base.OnMouseDoubleClick(e);
+
+        //    if (_cursorMode == PdfViewerCursorMode.TextSelection)
+        //    {
+        //        HandleMouseDoubleClickForTextSelection(e);
+        //    }
+        //}
 
         private void HandleMouseDownForLinks(MouseEventArgs e)
         {
@@ -1162,7 +1461,21 @@ namespace PdfiumViewer
             _isSelectingText = false;
             Capture = false;
             Invalidate();
+
+            // Copia automaticamente alla fine del drag
+            if (AutoCopyTextSelectionToClipboard)
+                TryCopySelectionToClipboard();
         }
+
+        //private void HandleMouseUpForTextSelection(MouseEventArgs e)
+        //{
+        //    if (e.Button != MouseButtons.Left)
+        //        return;
+
+        //    _isSelectingText = false;
+        //    Capture = false;
+        //    Invalidate();
+        //}
 
         private void HandleMouseMoveForTextSelection(MouseEventArgs e)
         {
@@ -1222,6 +1535,28 @@ namespace PdfiumViewer
 
             return _cachedMouseState;
         }
+
+
+        private void TryCopySelectionToClipboard()
+        {
+            try
+            {
+                if (!IsTextSelected)
+                    return;
+
+                var text = SelectedText;
+                if (string.IsNullOrWhiteSpace(text))
+                    return;
+
+                Clipboard.SetText(text);
+            }
+            catch
+            {
+                // In alcuni contesti (remote session / clipboard busy) può fallire.
+                // Evitiamo eccezioni.
+            }
+        }
+
 
         /// <summary>
         /// Occurs when a link in the pdf document is clicked.
@@ -1290,8 +1625,13 @@ namespace PdfiumViewer
         /// <param name="focus">The location to focus on.</param>
         protected override void SetZoom(double zoom, Point? focus)
         {
-            base.SetZoom(zoom, null);
+            base.SetZoom(zoom, focus);
         }
+
+        //protected override void SetZoom(double zoom, Point? focus)
+        //{
+        //    base.SetZoom(zoom, null);
+        //}
 
         private void RedrawMarkers()
         {
@@ -1362,6 +1702,25 @@ namespace PdfiumViewer
                 ));
             }
         }
+
+        public void ResetInteractionToDefault()
+        {
+            // chiudi rubberband/pan
+            _mode = PdfViewerInteractionMode.None;
+            _rbRect = Rectangle.Empty;
+            _rbPrevRect = Rectangle.Empty;
+
+            // chiudi selezione testo
+            _textSelectionState = null;
+            _isSelectingText = false;
+            Capture = false;
+
+            // torna alla modalità base
+            CursorMode = PdfViewerCursorMode.Pan;
+            Cursor = Cursors.Cross;
+            Invalidate();
+        }
+
 
         /// <summary>
         /// Releases the unmanaged resources used by the <see cref="T:System.Windows.Forms.Control"/> and its child controls and optionally releases the managed resources.

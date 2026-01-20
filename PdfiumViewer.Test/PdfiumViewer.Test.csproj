@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net40</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <AssemblyTitle>PdfiumViewer.Test</AssemblyTitle>
     <Product>PdfiumViewer.Test</Product>
     <Copyright>Copyright ©  2015</Copyright>
