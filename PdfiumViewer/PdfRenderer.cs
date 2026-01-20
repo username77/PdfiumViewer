@@ -422,6 +422,113 @@ namespace PdfiumViewer
                 (int)((point.Y / pageSize.Height) * size.Height)
             );
         }
+        public void ZoomToClientRectangle(Rectangle selectionClient)
+        {
+            if (Document == null || !_pageCacheValid)
+                return;
+
+            selectionClient = NormalizeRect(selectionClient);
+
+            // Scarta selezioni troppo piccole
+            if (selectionClient.Width < 6 || selectionClient.Height < 6)
+                return;
+
+            // Area visibile reale (senza scrollbar)
+            var clientArea = GetScrollClientArea();
+            if (clientArea.Width <= 0 || clientArea.Height <= 0)
+                return;
+
+            // Limita la selezione all'area visibile
+            var sel = Rectangle.Intersect(selectionClient, clientArea);
+            if (sel.Width < 6 || sel.Height < 6)
+                return;
+
+            // Centro della selezione (in client)
+            var selCenterClient = new Point(sel.Left + sel.Width / 2, sel.Top + sel.Height / 2);
+
+            // Punto PDF sotto il centro selezionato (STABILE) PRIMA dello zoom
+            var pdfCenter = PointToPdf(selCenterClient);
+            if (!pdfCenter.IsValid)
+                return;
+
+            // Converti selezione client -> "document coordinates" (quello che usa _pageCache)
+            var offset = GetScrollOffset();
+            var selDoc = new Rectangle(
+                sel.Left - offset.Width,
+                sel.Top - offset.Height,
+                sel.Width,
+                sel.Height
+            );
+
+            // Trova la pagina (usiamo il centro della selezione in coordinate documento)
+            var centerDoc = new Point(selDoc.Left + selDoc.Width / 2, selDoc.Top + selDoc.Height / 2);
+            int page = -1;
+            for (int p = 0; p < Document.PageCount; p++)
+            {
+                if (_pageCache[p].OuterBounds.Contains(centerDoc))
+                {
+                    page = p;
+                    break;
+                }
+            }
+            if (page < 0)
+                return;
+
+            // Interseca col bounds della pagina (parte bianca)
+            var pageBoundsDoc = _pageCache[page].Bounds;
+            var selOnPageDoc = Rectangle.Intersect(selDoc, pageBoundsDoc);
+            if (selOnPageDoc.Width < 6 || selOnPageDoc.Height < 6)
+                return;
+
+            // Calcola zoom target: newZoom = oldZoom * min(viewW/selW, viewH/selH) * margine
+            double oldZoom = Zoom;
+
+            double kx = (double)clientArea.Width / selOnPageDoc.Width;
+            double ky = (double)clientArea.Height / selOnPageDoc.Height;
+
+            double k = Math.Min(kx, ky) * 0.95; // piccolo margine
+            double newZoom = Clamp(oldZoom * k, ZoomMin, ZoomMax);
+
+            // Applica zoom
+            Zoom = newZoom;
+
+            // Dopo lo zoom, riconverti il PdfPoint in client e centra la vista su quel punto
+            var newClientPoint = PointFromPdf(pdfCenter);
+            CenterClientPoint(newClientPoint);
+        }
+
+        private void CenterClientPoint(Point clientPoint)
+        {
+            var clientArea = GetScrollClientArea();
+            if (clientArea.Width <= 0 || clientArea.Height <= 0)
+                return;
+
+            int desiredX = clientArea.Width / 2;
+            int desiredY = clientArea.Height / 2;
+
+            int dx = clientPoint.X - desiredX;
+            int dy = clientPoint.Y - desiredY;
+
+            // DisplayRectangle.Location e' lo "scroll offset" del documento: spostiamo la vista dell'opposto del delta
+            var display = DisplayRectangle.Location;
+            SetDisplayRectLocation(new Point(display.X - dx, display.Y - dy));
+        }
+
+        private static Rectangle NormalizeRect(Rectangle r)
+        {
+            int left = Math.Min(r.Left, r.Right);
+            int top = Math.Min(r.Top, r.Bottom);
+            int right = Math.Max(r.Left, r.Right);
+            int bottom = Math.Max(r.Top, r.Bottom);
+            return Rectangle.FromLTRB(left, top, right, bottom);
+        }
+
+        private static double Clamp(double v, double min, double max)
+        {
+            if (v < min) return min;
+            if (v > max) return max;
+            return v;
+        }
 
         private Size GetScrollOffset()
         {
