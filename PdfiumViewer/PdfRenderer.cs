@@ -76,6 +76,74 @@ namespace PdfiumViewer
         {
             get
             {
+                if (Document == null || !_pageCacheValid || _pageCache == null)
+                    return 0;
+
+                // IMPORTANT: durante layout/zoom _pageCache può non essere ancora allineata a PageCount
+                int pageCount = Math.Min(Document.PageSizes.Count, _pageCache.Count);
+                if (pageCount <= 0)
+                    return 0;
+
+                int viewTop = -DisplayRectangle.Top;
+                int viewBottom = viewTop + GetScrollClientArea().Height;
+
+                int bestPage = 0;
+                int bestOverlap = int.MinValue;
+
+                for (int page = 0; page < pageCount; page++)
+                {
+                    var b = _pageCache[page].OuterBounds;
+
+                    int overlapTop = Math.Max(viewTop, b.Top);
+                    int overlapBottom = Math.Min(viewBottom, b.Bottom);
+                    int overlap = overlapBottom - overlapTop;
+
+                    if (overlap > bestOverlap)
+                    {
+                        bestOverlap = overlap;
+                        bestPage = page;
+                    }
+                }
+
+                // clamp finale
+                if (bestPage < 0) bestPage = 0;
+                if (bestPage >= Document.PageCount) bestPage = Document.PageCount - 1;
+
+                return bestPage;
+            }
+            set
+            {
+                if (Document == null)
+                {
+                    SetDisplayRectLocation(new Point(0, 0));
+                    return;
+                }
+
+                // Se la cache non è pronta o è in transizione (layout/zoom), evita out-of-range
+                if (_pageCache == null || _pageCache.Count == 0)
+                {
+                    SetDisplayRectLocation(new Point(0, 0));
+                    return;
+                }
+
+                int page = Math.Min(Math.Max(value, 0), Document.PageCount - 1);
+
+                // Clamp rispetto alla cache reale (può essere temporaneamente più corta di PageCount)
+                if (page >= _pageCache.Count)
+                    page = _pageCache.Count - 1;
+
+                SetDisplayRectLocation(new Point(0, -_pageCache[page].OuterBounds.Top));
+            }
+
+        }
+
+
+
+
+        public int PageOld
+        {
+            get
+            {
                 if (Document == null || !_pageCacheValid)
                     return 0;
 
@@ -113,6 +181,23 @@ namespace PdfiumViewer
                 }
             }
         }
+
+        public Point GetDisplayLocation()
+        {
+            return DisplayRectangle.Location;
+        }
+
+        public void SetDisplayLocation(Point location)
+        {
+            // location è in coordinate DisplayRectangle (di solito Y negativa quando scrolli in giù)
+            SetDisplayRectLocation(location);
+        }
+
+        public Rectangle GetDisplayRect()
+        {
+            return DisplayRectangle;
+        }
+
 
         /// <summary>
         /// Get the outer bounds of the page.
@@ -754,22 +839,110 @@ namespace PdfiumViewer
 
                 offset += fullHeight;
             }
+
+            // Dopo il for principale in RebuildPageCache()
+            int newCount = Document.PageSizes.Count;
+
+            for (int i = newCount; i < _pageCache.Count; i++)
+            {
+                var pc = _pageCache[i];
+                if (pc?.Image != null)
+                {
+                    pc.Image.Dispose();
+                    pc.Image = null;
+                }
+                if (pc != null)
+                    pc.Links = null;
+            }
+
+            // opzionale: se vuoi proprio accorciare la lista (io lo farei)
+            if (_pageCache.Count > newCount)
+                _pageCache.RemoveRange(newCount, _pageCache.Count - newCount);
+
         }
+
+        private static readonly List<PageLink> s_emptyPageLinks = new List<PageLink>(0);
 
         private List<PageLink> GetPageLinks(int page)
         {
-            var pageCache = _pageCache[page];
-            if (pageCache.Links == null)
-            {
-                pageCache.Links = new List<PageLink>();
-                foreach (var link in Document.GetPageLinks(page, pageCache.Bounds.Size).Links)
-                {
-                    pageCache.Links.Add(new PageLink(link, BoundsFromPdf(new PdfRectangle(page, link.Bounds), false)));
-                }
-            }
+            if (_pageCache == null || page < 0 || page >= _pageCache.Count)
+                return s_emptyPageLinks;
 
-            return pageCache.Links;
+            var pageCache = _pageCache[page];
+            if (pageCache == null)
+                return s_emptyPageLinks;
+
+            // già calcolati (anche vuoti)
+            if (pageCache.Links != null)
+                return pageCache.Links;
+
+            try
+            {
+                var doc = Document;
+                if (doc == null)
+                {
+                    pageCache.Links = s_emptyPageLinks;
+                    return pageCache.Links;
+                }
+
+                var size = pageCache.Bounds.Size;
+                if (size.Width <= 0 || size.Height <= 0)
+                {
+                    pageCache.Links = s_emptyPageLinks;
+                    return pageCache.Links;
+                }
+
+                var pageLinks = doc.GetPageLinks(page, size);
+                var rawLinks = pageLinks?.Links; // IList<PdfPageLink>
+
+                if (rawLinks == null || rawLinks.Count == 0)
+                {
+                    pageCache.Links = s_emptyPageLinks;
+                    return pageCache.Links;
+                }
+
+                var list = new List<PageLink>(rawLinks.Count);
+                foreach (var link in rawLinks)
+                {
+                    var clientBounds = BoundsFromPdf(new PdfRectangle(page, link.Bounds), false);
+                    list.Add(new PageLink(link, clientBounds));
+                }
+
+                pageCache.Links = list;
+                return pageCache.Links;
+            }
+            catch (ObjectDisposedException)
+            {
+                pageCache.Links = s_emptyPageLinks;
+                return pageCache.Links;
+            }
+            catch (NullReferenceException)
+            {
+                pageCache.Links = s_emptyPageLinks;
+                return pageCache.Links;
+            }
+            catch
+            {
+                pageCache.Links = s_emptyPageLinks;
+                return pageCache.Links;
+            }
         }
+
+
+        //private List<PageLink> GetPageLinks(int page)
+        //{
+        //    var pageCache = _pageCache[page];
+        //    if (pageCache.Links == null)
+        //    {
+        //        pageCache.Links = new List<PageLink>();
+        //        foreach (var link in Document.GetPageLinks(page, pageCache.Bounds.Size).Links)
+        //        {
+        //            pageCache.Links.Add(new PageLink(link, BoundsFromPdf(new PdfRectangle(page, link.Bounds), false)));
+        //        }
+        //    }
+
+        //    return pageCache.Links;
+        //}
 
         private Rectangle GetScrollClientArea()
         {
@@ -1310,6 +1483,14 @@ namespace PdfiumViewer
 
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
+            // DOUBLE CLICK DESTRO => reset FitBest + torna in modalità "normale" (croce + zoom-rect)
+            if (e.Button == MouseButtons.Right)
+            {
+                ResetViewToFitBest(keepCurrentPage: true);
+                return;
+            }
+
+
             if (e.Button == MouseButtons.Left)
             {
                 // Proviamo a capire subito se sotto il mouse c'è una parola
@@ -1512,29 +1693,62 @@ namespace PdfiumViewer
                 Invalidate();
             }
         }
-
         private MouseState GetMouseState(Point mouseLocation)
         {
-            // OnMouseMove and OnSetCursor get invoked a lot, often multiple times in succession for the same point.
-            // By just caching the mouse state for the last known position we can save a lot of work.
-
             var currentState = _cachedMouseState;
             if (currentState?.MouseLocation == mouseLocation)
                 return currentState;
 
             _cachedMouseState = new MouseState()
             {
-                MouseLocation = mouseLocation,
-                PdfLocation = PointToPdf(mouseLocation)
+                MouseLocation = mouseLocation
             };
 
-            if (!_cachedMouseState.PdfLocation.IsValid)
-                return _cachedMouseState;
+            try
+            {
+                if (Document == null)
+                    return _cachedMouseState;
 
-            _cachedMouseState.CharacterIndex = Document.GetCharacterIndexAtPosition(_cachedMouseState.PdfLocation, 4f, 4f);
+                _cachedMouseState.PdfLocation = PointToPdf(mouseLocation);
+
+                if (!_cachedMouseState.PdfLocation.IsValid)
+                    return _cachedMouseState;
+
+                _cachedMouseState.CharacterIndex =
+                    Document.GetCharacterIndexAtPosition(_cachedMouseState.PdfLocation, 4f, 4f);
+            }
+            catch
+            {
+                // non deve mai crashare il cursor/mouse move
+                _cachedMouseState.PdfLocation = PdfPoint.Empty;
+                _cachedMouseState.CharacterIndex = -1;
+            }
 
             return _cachedMouseState;
         }
+
+        //private MouseState GetMouseState(Point mouseLocation)
+        //{
+        //    // OnMouseMove and OnSetCursor get invoked a lot, often multiple times in succession for the same point.
+        //    // By just caching the mouse state for the last known position we can save a lot of work.
+
+        //    var currentState = _cachedMouseState;
+        //    if (currentState?.MouseLocation == mouseLocation)
+        //        return currentState;
+
+        //    _cachedMouseState = new MouseState()
+        //    {
+        //        MouseLocation = mouseLocation,
+        //        PdfLocation = PointToPdf(mouseLocation)
+        //    };
+
+        //    if (!_cachedMouseState.PdfLocation.IsValid)
+        //        return _cachedMouseState;
+
+        //    _cachedMouseState.CharacterIndex = Document.GetCharacterIndexAtPosition(_cachedMouseState.PdfLocation, 4f, 4f);
+
+        //    return _cachedMouseState;
+        //}
 
 
         private void TryCopySelectionToClipboard()
@@ -1701,6 +1915,36 @@ namespace PdfiumViewer
                     -offset
                 ));
             }
+        }
+
+        private void ResetViewToFitBest(bool keepCurrentPage = true)
+        {
+            if (Document == null)
+                return;
+
+            int page = 0;
+            if (keepCurrentPage && _pageCacheValid)
+                page = Page;
+
+            // reset zoom "fit"
+            ZoomMode = PdfViewerZoomMode.FitBest;
+            Zoom = 1.0;
+
+            // forza layout/cache aggiornati (FitBest dipende dalla size del controllo)
+            PerformLayout();
+
+            // resta sulla stessa pagina (se possibile)
+            if (keepCurrentPage && Document != null)
+            {
+                try { Page = page; } catch { /* ignore */ }
+            }
+            else
+            {
+                SetDisplayRectLocation(new Point(0, 0));
+            }
+
+            // torna alla modalità base: croce + rubberband zoom (nel tuo fork)
+            ResetInteractionToDefault();
         }
 
         public void ResetInteractionToDefault()

@@ -606,8 +606,36 @@ namespace PdfiumViewer
         /// <returns>A collection with the links on the page.</returns>
         public PdfPageLinks GetPageLinks(int page, Size size)
         {
-            return _file.GetPageLinks(page, size);
+            // Se il documento è stato disposed (o si sta chiudendo) non deve mai crashare il cursore.
+            if (_disposed || _file == null)
+                return null; // oppure un PdfPageLinks "vuoto" se ce l'hai
+
+            try
+            {
+                return _file.GetPageLinks(page, size);
+            }
+            catch (ObjectDisposedException)
+            {
+                return null;
+            }
+            catch (NullReferenceException)
+            {
+                // difesa extra: alcuni PDF "rotti" o race interne possono causare NRE nei wrapper
+                return null;
+            }
+            catch
+            {
+                // Link parsing non deve buttare giù il viewer
+                return null;
+            }
         }
+
+
+
+        //public PdfPageLinks GetPageLinks(int page, Size size)
+        //{
+        //    return _file.GetPageLinks(page, size);
+        //}
 
         /// <summary>
         /// Delete the page from the PDF document.

@@ -168,13 +168,49 @@ namespace PdfiumViewer.Demo
 
         private void toolStripButton1_Click_1(object sender, EventArgs e)
         {
-            pdfViewer1.Renderer.Page--;
+            //pdfViewer1.Renderer.Page--;
+            PrevPage();
         }
 
         private void toolStripButton2_Click(object sender, EventArgs e)
         {
-            pdfViewer1.Renderer.Page++;
+            //pdfViewer1.Renderer.Page++;
+            NextPage();
         }
+
+        private int GetStablePage(PdfiumViewer.PdfRenderer r)
+        {
+            if (r?.Document == null) return 0;
+
+            // punto al centro del viewer (client coords)
+            var center = new Point(r.ClientSize.Width / 2, r.ClientSize.Height / 2);
+
+            // converte a PdfPoint (ha Page)
+            var p = r.PointToPdf(center);
+            if (p.IsValid) return p.Page;
+
+            // fallback: usa il Page attuale
+            return r.Page;
+        }
+
+        private void NextPage()
+        {
+            var r = pdfViewer1.Renderer;
+            if (r?.Document == null) return;
+
+            int p = GetStablePage(r);
+            r.Page = Math.Min(p + 1, r.Document.PageCount - 1);
+        }
+
+        private void PrevPage()
+        {
+            var r = pdfViewer1.Renderer;
+            if (r?.Document == null) return;
+
+            int p = GetStablePage(r);
+            r.Page = Math.Max(p - 1, 0);
+        }
+
 
         private void cutMarginsWhenPrintingToolStripMenuItem_Click(object sender, EventArgs e)
         {
