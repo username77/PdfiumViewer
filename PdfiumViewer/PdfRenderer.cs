@@ -76,74 +76,6 @@ namespace PdfiumViewer
         {
             get
             {
-                if (Document == null || !_pageCacheValid || _pageCache == null)
-                    return 0;
-
-                // IMPORTANT: durante layout/zoom _pageCache può non essere ancora allineata a PageCount
-                int pageCount = Math.Min(Document.PageSizes.Count, _pageCache.Count);
-                if (pageCount <= 0)
-                    return 0;
-
-                int viewTop = -DisplayRectangle.Top;
-                int viewBottom = viewTop + GetScrollClientArea().Height;
-
-                int bestPage = 0;
-                int bestOverlap = int.MinValue;
-
-                for (int page = 0; page < pageCount; page++)
-                {
-                    var b = _pageCache[page].OuterBounds;
-
-                    int overlapTop = Math.Max(viewTop, b.Top);
-                    int overlapBottom = Math.Min(viewBottom, b.Bottom);
-                    int overlap = overlapBottom - overlapTop;
-
-                    if (overlap > bestOverlap)
-                    {
-                        bestOverlap = overlap;
-                        bestPage = page;
-                    }
-                }
-
-                // clamp finale
-                if (bestPage < 0) bestPage = 0;
-                if (bestPage >= Document.PageCount) bestPage = Document.PageCount - 1;
-
-                return bestPage;
-            }
-            set
-            {
-                if (Document == null)
-                {
-                    SetDisplayRectLocation(new Point(0, 0));
-                    return;
-                }
-
-                // Se la cache non è pronta o è in transizione (layout/zoom), evita out-of-range
-                if (_pageCache == null || _pageCache.Count == 0)
-                {
-                    SetDisplayRectLocation(new Point(0, 0));
-                    return;
-                }
-
-                int page = Math.Min(Math.Max(value, 0), Document.PageCount - 1);
-
-                // Clamp rispetto alla cache reale (può essere temporaneamente più corta di PageCount)
-                if (page >= _pageCache.Count)
-                    page = _pageCache.Count - 1;
-
-                SetDisplayRectLocation(new Point(0, -_pageCache[page].OuterBounds.Top));
-            }
-
-        }
-
-
-
-
-        public int PageOld
-        {
-            get
-            {
                 if (Document == null || !_pageCacheValid)
                     return 0;
 
@@ -730,6 +662,35 @@ namespace PdfiumViewer
             ReloadDocument();
 
             ResetInteractionToDefault(); //resetta la modalità di interazione
+        }
+
+        /// <summary>
+        /// Clears the currently loaded <see cref="IPdfDocument"/> from the control.
+        /// </summary>
+        public void ClearDocument()
+        {
+            foreach (var pageCache in _pageCache)
+            {
+                if (pageCache.Image != null)
+                {
+                    pageCache.Image.Dispose();
+                    pageCache.Image = null;
+                }
+            }
+
+            _pageCache.Clear();
+            _pageCacheValid = false;
+            _textSelectionState = null;
+            _markers = null;
+            _visiblePageStart = -1;
+            _visiblePageEnd = -1;
+            _maxWidth = 0;
+            _maxHeight = 0;
+            _documentScaleFactor = 0D;
+            Document = null;
+
+            SetDisplayRectLocation(new Point(0, 0));
+            Invalidate();
         }
 
         public void ReloadDocument()
