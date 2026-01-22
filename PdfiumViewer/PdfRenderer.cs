@@ -524,6 +524,35 @@ namespace PdfiumViewer
             ReloadDocument();
         }
 
+        /// <summary>
+        /// Clears the currently loaded <see cref="IPdfDocument"/> from the control.
+        /// </summary>
+        public void ClearDocument()
+        {
+            foreach (var pageCache in _pageCache)
+            {
+                if (pageCache.Image != null)
+                {
+                    pageCache.Image.Dispose();
+                    pageCache.Image = null;
+                }
+            }
+
+            _pageCache.Clear();
+            _pageCacheValid = false;
+            _textSelectionState = null;
+            _markers = null;
+            _visiblePageStart = -1;
+            _visiblePageEnd = -1;
+            _maxWidth = 0;
+            _maxHeight = 0;
+            _documentScaleFactor = 0D;
+            Document = null;
+
+            SetDisplayRectLocation(new Point(0, 0));
+            Invalidate();
+        }
+
         public void ReloadDocument()
         {
             _maxWidth = 0;

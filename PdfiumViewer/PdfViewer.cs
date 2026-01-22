@@ -32,6 +32,11 @@ namespace PdfiumViewer
                         _renderer.Load(_document);
                         UpdateBookmarks();
                     }
+                    else
+                    {
+                        _renderer.ClearDocument();
+                        UpdateBookmarks();
+                    }
 
                     UpdateEnabled();
                 }
@@ -123,14 +128,15 @@ namespace PdfiumViewer
 
             _container.Panel1Collapsed = !visible;
 
-            if (visible)
-            {
-                _container.Panel1Collapsed = false;
+            _bookmarks.Nodes.Clear();
 
-                _bookmarks.Nodes.Clear();
-                foreach (var bookmark in _document.Bookmarks)
-                    _bookmarks.Nodes.Add(GetBookmarkNode(bookmark));
-            }
+            if (!visible)
+                return;
+
+            _container.Panel1Collapsed = false;
+
+            foreach (var bookmark in _document.Bookmarks)
+                _bookmarks.Nodes.Add(GetBookmarkNode(bookmark));
         }
 
         /// <summary>
