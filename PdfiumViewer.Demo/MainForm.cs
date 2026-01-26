@@ -35,6 +35,7 @@ namespace PdfiumViewer.Demo
             Disposed += (s, e) => pdfViewer1.Document?.Dispose();
         }
 
+     
         private void Renderer_MouseLeave(object sender, EventArgs e)
         {
             ShowPdfLocation(PdfPoint.Empty);
