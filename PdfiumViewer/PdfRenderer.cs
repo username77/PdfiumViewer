@@ -1349,6 +1349,7 @@ namespace PdfiumViewer
                 _mode = PdfViewerInteractionMode.None;
 
                 Cursor = Cursors.Cross; // torna croce come richiesto
+                base.OnMouseUp(e);
                 return;
             }
 
@@ -1368,6 +1369,7 @@ namespace PdfiumViewer
                 if (rect.Width >= 8 && rect.Height >= 8)
                     ZoomToClientRectangle(rect);
 
+                base.OnMouseUp(e);
                 return;
             }
 
@@ -1375,6 +1377,7 @@ namespace PdfiumViewer
             if (e.Button == MouseButtons.Middle)
             {
                 Cursor = Cursors.Cross;
+                base.OnMouseUp(e);
                 return;
             }
 
