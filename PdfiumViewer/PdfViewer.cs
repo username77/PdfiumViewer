@@ -44,6 +44,25 @@ namespace PdfiumViewer
         }
 
         /// <summary>
+        /// Clears the current document from the viewer and disposes it.
+        /// </summary>
+        public void ReleaseDocument()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke((Action)ReleaseDocument);
+                return;
+            }
+
+            var document = _document;
+            if (document == null)
+                return;
+
+            Document = null;
+            document.Dispose();
+        }
+
+        /// <summary>
         /// Get the <see cref="PdfRenderer"/> that renders the PDF document.
         /// </summary>
         public PdfRenderer Renderer
