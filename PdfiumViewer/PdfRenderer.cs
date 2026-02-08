@@ -82,22 +82,22 @@ namespace PdfiumViewer
                 int top = -DisplayRectangle.Top;
                 int bottom = top + GetScrollClientArea().Height;
 
+                int bestPage = 0;
+                int bestVisible = -1;
+
                 for (int page = 0; page < Document.PageSizes.Count; page++)
                 {
                     var pageCache = _pageCache[page].OuterBounds;
-                    if (top - 10 < pageCache.Top)
+                    int visible = Math.Max(0, Math.Min(bottom, pageCache.Bottom) - Math.Max(top, pageCache.Top));
+
+                    if (visible > bestVisible)
                     {
-                        // If more than 50% of the page is hidden, return the previous page.
-
-                        int hidden = pageCache.Bottom - bottom;
-                        if (hidden > 0 && (double)hidden / pageCache.Height > 0.5 && page > 0)
-                            return page - 1;
-
-                        return page;
+                        bestVisible = visible;
+                        bestPage = page;
                     }
                 }
 
-                return Document.PageCount - 1;
+                return bestPage;
             }
             set
             {
