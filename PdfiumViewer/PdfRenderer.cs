@@ -38,6 +38,7 @@ namespace PdfiumViewer
         private MouseState _cachedMouseState = null;
         private TextSelectionState _textSelectionState = null;
         private PdfViewerInteractionMode _mode = PdfViewerInteractionMode.None;
+        private double _dominantPageShare = 0.6;
 
         private Point _rbStart;
         private Rectangle _rbRect;
@@ -70,6 +71,17 @@ namespace PdfiumViewer
         }
 
         /// <summary>
+        /// Gets or sets the minimum viewport share required for a page to be treated as dominant
+        /// when determining the current page. Values are clamped between 0.51 and 1.0.
+        /// </summary>
+        [DefaultValue(0.6)]
+        public double DominantPageShare
+        {
+            get { return _dominantPageShare; }
+            set { _dominantPageShare = Clamp(value, 0.51, 1.0); }
+        }
+
+        /// <summary>
         /// Gets or sets the currently focused page.
         /// </summary>
         public int Page
@@ -82,22 +94,32 @@ namespace PdfiumViewer
                 int top = -DisplayRectangle.Top;
                 int bottom = top + GetScrollClientArea().Height;
 
+                int bestPage = 0;
+                int bestVisible = -1;
+                int dominantPage = -1;
+                double dominantShare = 0D;
+                int viewportHeight = GetScrollClientArea().Height;
+
                 for (int page = 0; page < Document.PageSizes.Count; page++)
                 {
                     var pageCache = _pageCache[page].OuterBounds;
-                    if (top - 10 < pageCache.Top)
+                    int visible = Math.Max(0, Math.Min(bottom, pageCache.Bottom) - Math.Max(top, pageCache.Top));
+                    double share = viewportHeight > 0 ? (double)visible / viewportHeight : 0D;
+
+                    if (visible > bestVisible)
                     {
-                        // If more than 50% of the page is hidden, return the previous page.
+                        bestVisible = visible;
+                        bestPage = page;
+                    }
 
-                        int hidden = pageCache.Bottom - bottom;
-                        if (hidden > 0 && (double)hidden / pageCache.Height > 0.5 && page > 0)
-                            return page - 1;
-
-                        return page;
+                    if (share >= _dominantPageShare && share > dominantShare)
+                    {
+                        dominantShare = share;
+                        dominantPage = page;
                     }
                 }
 
-                return Document.PageCount - 1;
+                return dominantPage >= 0 ? dominantPage : bestPage;
             }
             set
             {
