@@ -38,7 +38,8 @@ namespace PdfiumViewer
         private MouseState _cachedMouseState = null;
         private TextSelectionState _textSelectionState = null;
         private PdfViewerInteractionMode _mode = PdfViewerInteractionMode.None;
-        private double _dominantPageShare = 0.6;
+        private double _dominantPageShare = 0.1;
+        private int _currentPage = -1;
 
         private Point _rbStart;
         private Rectangle _rbRect;
@@ -71,14 +72,15 @@ namespace PdfiumViewer
         }
 
         /// <summary>
-        /// Gets or sets the minimum viewport share required for a page to be treated as dominant
-        /// when determining the current page. Values are clamped between 0.51 and 1.0.
+        /// Gets or sets the minimum lead over the next most visible page (as a share of the viewport)
+        /// required for a page to be treated as dominant when determining the current page.
+        /// Values are clamped between 0.0 and 1.0.
         /// </summary>
-        [DefaultValue(0.6)]
+        [DefaultValue(0.1)]
         public double DominantPageShare
         {
             get { return _dominantPageShare; }
-            set { _dominantPageShare = Clamp(value, 0.51, 1.0); }
+            set { _dominantPageShare = Clamp(value, 0.0, 1.0); }
         }
 
         /// <summary>
@@ -96,30 +98,37 @@ namespace PdfiumViewer
 
                 int bestPage = 0;
                 int bestVisible = -1;
-                int dominantPage = -1;
-                double dominantShare = 0D;
+                int secondBestVisible = -1;
                 int viewportHeight = GetScrollClientArea().Height;
 
                 for (int page = 0; page < Document.PageSizes.Count; page++)
                 {
                     var pageCache = _pageCache[page].OuterBounds;
                     int visible = Math.Max(0, Math.Min(bottom, pageCache.Bottom) - Math.Max(top, pageCache.Top));
-                    double share = viewportHeight > 0 ? (double)visible / viewportHeight : 0D;
 
                     if (visible > bestVisible)
                     {
+                        secondBestVisible = bestVisible;
                         bestVisible = visible;
                         bestPage = page;
                     }
-
-                    if (share >= _dominantPageShare && share > dominantShare)
+                    else if (visible > secondBestVisible)
                     {
-                        dominantShare = share;
-                        dominantPage = page;
+                        secondBestVisible = visible;
                     }
                 }
 
-                return dominantPage >= 0 ? dominantPage : bestPage;
+                if (viewportHeight > 0 && bestVisible >= 0)
+                {
+                    double leadShare = (double)(bestVisible - Math.Max(0, secondBestVisible)) / viewportHeight;
+                    if (leadShare >= _dominantPageShare)
+                        _currentPage = bestPage;
+                }
+
+                if (_currentPage < 0)
+                    _currentPage = bestPage;
+
+                return _currentPage;
             }
             set
             {
@@ -132,6 +141,7 @@ namespace PdfiumViewer
                     int page = Math.Min(Math.Max(value, 0), Document.PageCount - 1);
 
                     SetDisplayRectLocation(new Point(0, -_pageCache[page].OuterBounds.Top));
+                    _currentPage = page;
                 }
             }
         }
