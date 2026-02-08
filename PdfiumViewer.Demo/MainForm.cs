@@ -26,7 +26,7 @@ namespace PdfiumViewer.Demo
 
             pdfViewer1.Renderer.MouseMove += Renderer_MouseMove;
             pdfViewer1.Renderer.MouseLeave += Renderer_MouseLeave;
-            pdfViewer1.Renderer.DominantPageShare = 0.8d;
+            pdfViewer1.Renderer.DominantPageShare = 0.3d;
             ShowPdfLocation(PdfPoint.Empty);
 
             cutMarginsWhenPrintingToolStripMenuItem.PerformClick();
