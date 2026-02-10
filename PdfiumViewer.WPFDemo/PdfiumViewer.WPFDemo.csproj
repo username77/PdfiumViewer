@@ -52,7 +52,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="bblanchon.PDFium.Win32">
-      <Version>122.0.6219</Version>
+      <Version>146.0.7678</Version>
     </PackageReference>
   </ItemGroup>
 </Project>
